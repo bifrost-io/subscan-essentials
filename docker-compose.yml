@@ -1,42 +1,109 @@
-version: "2.4"
+version: "3.9"
 
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: subscan-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: subscan
+      MYSQL_ROOT_PASSWORD: "helloload"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    # 不映射到宿主机端口，避免暴露到外网
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: subscan-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    # 不映射到宿主机端口，避免暴露到外网
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app_net
+
   subscan-api:
     build: .
     image: subscan/api
-    environment: &app_base
-      MYSQL_HOST: mysql
-      MYSQL_PASS: 'helloload'
-      MYSQL_USER: 'root'
-      # Name of the database subscan will connect to and use
-      # this db must exist
-      MYSQL_DB: 'subscan'
-      REDIS_ADDR: redis:6379
-      CHAIN_WS_ENDPOINT: 'wss://polkadot.api.onfinality.io/public-ws'
-      # the types file used for the chain as:
-      # configs/source/{NETWORK_NODE}.json
-      NETWORK_NODE: 'polkadot'
-      DEPLOY_ENV: 'prod'
+    container_name: subscan-api
+    restart: unless-stopped
+    environment: &app_env
+      WORKER_GOROUTINE_COUNT: "20"
+      CHAIN_WS_ENDPOINT: "wss://eu.bifrost-kusama-rpc.liebi.com/ws"
+      NETWORK_NODE: "bifrost-kusama"
+      SUBSTRATE_ADDRESS_TYPE: "6"
+      SUBSTRATE_ACCURACY: "12"
+      DB_DRIVER: "mysql"
+      MYSQL_HOST: "mysql"
+      MYSQL_PORT: "3306"
+      MYSQL_USER: "root"
+      MYSQL_PASS: "helloload"
+      MYSQL_DB: "subscan"
+      # PostgreSQL（当前未启用，保留作切换参考）
+      # POSTGRES_HOST: "postgres"
+      # POSTGRES_PORT: "5432"
+      # POSTGRES_USER: "gorm"
+      # POSTGRES_PASS: "gorm"
+      # POSTGRES_DB: "subscan"
+      # POSTGRES_SSL_MODE: "disable"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      DEPLOY_ENV: "prod"
     ports:
-      - '4399:4399'
+      - "4399:4399"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - app_net
+
   subscan-observer:
-    environment:
-      <<: *app_base
     image: subscan/api
-    command: ["start","subscribe"]
+    container_name: subscan-observer
+    restart: unless-stopped
+    environment:
+      <<: *app_env
+    command: ["start", "subscribe"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - app_net
 
   subscan-worker:
-    environment:
-      <<: *app_base
     image: subscan/api
-    command: [ "start","worker" ]
+    restart: unless-stopped
+    environment:
+      <<: *app_env
+    command: ["start", "worker"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - app_net
 
+
 networks:
   app_net:
-    external: true
+    driver: bridge
