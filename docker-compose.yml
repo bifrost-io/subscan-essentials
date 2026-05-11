@@ -8,10 +8,15 @@ services:
     environment:
       MYSQL_DATABASE: subscan
       MYSQL_ROOT_PASSWORD: "helloload"
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    # 每个连库的容器各用一份 MAX_DB_CONN_COUNT。例：api(1)+observer(1)+worker×10=12 → 12×80=960，须留余量
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_connections=2000
     # 不映射到宿主机端口，避免暴露到外网
+    # 数据目录默认在项目下 ./data/mysql（通常在 /data 盘）；盘满时在 .env 设 MYSQL_DATA_DIR 指到根盘路径，见 .env 示例
     volumes:
-      - ./data/mysql:/var/lib/mysql
+      - ${MYSQL_DATA_DIR:-./data/mysql}:/var/lib/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
       interval: 10s
@@ -42,6 +47,9 @@ services:
     container_name: subscan-api
     restart: unless-stopped
     environment: &app_env
+      # 每容器进程上限；合计 ≈ (1 api + 1 observer + scale worker 数) × 本值 < mysql max_connections
+      MAX_DB_CONN_COUNT: "80"
+      # 同步并发 worker 数，过大易打满 RPC/DB，可逐步调高试
       WORKER_GOROUTINE_COUNT: "20"
       CHAIN_WS_ENDPOINT: "wss://eu.bifrost-kusama-rpc.liebi.com/ws"
       NETWORK_NODE: "bifrost-kusama"
