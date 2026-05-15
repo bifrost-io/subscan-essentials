@@ -72,8 +72,9 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ""
       DEPLOY_ENV: "prod"
+    # 仅绑定本机回环，由宿主机 nginx 反代；外网不直连该端口
     ports:
-      - "4399:4399"
+      - "127.0.0.1:4399:4399"
     depends_on:
       mysql:
         condition: service_healthy
